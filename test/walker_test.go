@@ -6,7 +6,7 @@ import (
     "testing"
 )
 
-var path string = "/users/ariefdarmawan/Temp/bhesada/original"
+var path = "/users/ariefdarmawan/Temp/bhesada/original"
 
 func TestWalk(t *testing.T){
     toolkit.Println("OK")

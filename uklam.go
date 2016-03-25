@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-type IFSWalker interface {
+type IDataWalker interface {
 }
 
 type WalkerStatusEnum int
@@ -21,13 +21,13 @@ type FSWalker struct {
 	sync.RWMutex
 
 	Setting         *toolkit.M
-	Path            string
+	Host            string
 	RefreshDuration time.Duration
-	CheckFn         func(toolkit.M)*toolkit.Result
-	WalkFn          func(toolkit.M)*toolkit.Result
+	CheckFn         func(toolkit.M) *toolkit.Result
+	WalkFn          func(toolkit.M) *toolkit.Result
 	Status          WalkerStatusEnum
-    
-    chanCommand chan toolkit.M
+
+	chanCommand chan toolkit.M
 
 	log *toolkit.LogEngine
 }
@@ -47,10 +47,10 @@ func SetDefaultRefreshDuration(t time.Duration) {
 
 func NewFS(path string) *FSWalker {
 	fs := new(FSWalker)
-	fs.Path = path
+	fs.Host = path
 	fs.RefreshDuration = DefaultRefreshDuration()
 	fs.log, _ = toolkit.NewLog(true, false, "", "", "")
-    fs.chanCommand = make(chan toolkit.M)
+	fs.chanCommand = make(chan toolkit.M)
 	return fs
 }
 
@@ -69,48 +69,48 @@ func (fs *FSWalker) SetLog(l *toolkit.LogEngine) {
 }
 
 func (fs *FSWalker) Start() {
-    go func(){
-        for{
-            select{
-                case m := <-fs.chanCommand:
-                    fs.processCommand(m)
-                    if m.GetString("command")=="stop"{
-                        return
-                    }
-                    
-                case <-time.After(fs.RefreshDuration):
-                    r:=fs.CheckFn(nil)
-                    if r.Status!=toolkit.Status_OK{
-                        fs.log.Error("Check Fail: " + r.Message)
-                    }
-                    fs.chanCommand <- toolkit.M{}.Set("command","walk").Set("data",r.Data)
-                    
-                default:
-                    // do nothing
-            }
-        }
-    }()
+	go func() {
+		for {
+			select {
+			case m := <-fs.chanCommand:
+				fs.processCommand(m)
+				if m.GetString("command") == "stop" {
+					return
+				}
+
+			case <-time.After(fs.RefreshDuration):
+				r := fs.CheckFn(nil)
+				if r.Status != toolkit.Status_OK {
+					fs.log.Error("Check Fail: " + r.Message)
+				}
+				fs.chanCommand <- toolkit.M{}.Set("command", "walk").Set("data", r.Data)
+
+			default:
+				// do nothing
+			}
+		}
+	}()
 }
 
-func (fs *FSWalker) processCommand(m toolkit.M){
-    cmd := m.GetString("command")
-    if cmd=="stop"{
-        if fs.log!=nil{
-            fs.log.Close()
-        }
-        return
-    }
-    
-    if cmd=="walk"{
-        if fs.WalkFn!=nil{
-            r:=fs.WalkFn(m.Get("list",toolkit.M{}).(toolkit.M))
-            if r.Status!=toolkit.Status_OK{
-                fs.log.Error("Walking Fail: " + r.Message)
-            }
-        }
-    }
+func (fs *FSWalker) processCommand(m toolkit.M) {
+	cmd := m.GetString("command")
+	if cmd == "stop" {
+		if fs.log != nil {
+			fs.log.Close()
+		}
+		return
+	}
+
+	if cmd == "walk" {
+		if fs.WalkFn != nil {
+			r := fs.WalkFn(m)
+			if r.Status != toolkit.Status_OK {
+				fs.log.Error("Walking Fail: " + r.Message)
+			}
+		}
+	}
 }
 
 func (fs *FSWalker) Stop() {
-	fs.chanCommand <- toolkit.M{}.Set("command","stop")
+	fs.chanCommand <- toolkit.M{}.Set("command", "stop")
 }
