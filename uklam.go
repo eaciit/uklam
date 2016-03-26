@@ -4,9 +4,13 @@ import (
 	"github.com/eaciit/toolkit"
 	"sync"
 	"time"
+    "os"
+    "io/ioutil"
 )
 
 type IDataWalker interface {
+    SetHost(string)
+    Host() string
 }
 
 type WalkerStatusEnum int
@@ -21,15 +25,16 @@ type FSWalker struct {
 	sync.RWMutex
 
 	Setting         *toolkit.M
-	Host            string
 	RefreshDuration time.Duration
-	CheckFn         func(toolkit.M) *toolkit.Result
-	WalkFn          func(toolkit.M) *toolkit.Result
-	Status          WalkerStatusEnum
+	CheckFn         func(IDataWalker, toolkit.M) *toolkit.Result
+	WalkFn          func(IDataWalker, toolkit.M) *toolkit.Result
+    EachFn          func(IDataWalker, toolkit.M, os.FileInfo, *toolkit.Result)
+    Status          WalkerStatusEnum
 
 	chanCommand chan toolkit.M
 
-	log *toolkit.LogEngine
+	_host string
+    log *toolkit.LogEngine
 }
 
 var _defaultRefreshDuration time.Duration
@@ -47,11 +52,19 @@ func SetDefaultRefreshDuration(t time.Duration) {
 
 func NewFS(path string) *FSWalker {
 	fs := new(FSWalker)
-	fs.Host = path
+	fs._host = path
 	fs.RefreshDuration = DefaultRefreshDuration()
 	fs.log, _ = toolkit.NewLog(true, false, "", "", "")
 	fs.chanCommand = make(chan toolkit.M)
 	return fs
+}
+
+func (fs *FSWalker) SetHost(h string){
+    fs._host = h
+}
+
+func (fs *FSWalker) Host() string{
+    return fs._host
 }
 
 func (fs *FSWalker) Log() *toolkit.LogEngine {
@@ -68,24 +81,58 @@ func (fs *FSWalker) SetLog(l *toolkit.LogEngine) {
 	fs.log = l
 }
 
+func checkFile(dw IDataWalker, in toolkit.M)*toolkit.Result{
+    r := toolkit.NewResult()
+    infos, e := ioutil.ReadDir(dw.Host())
+    if e!=nil {
+        return r.SetError(e)
+    }
+    //toolkit.Println("Files: ", len(infos))
+    r.Data = infos
+    return r
+}
+
 func (fs *FSWalker) Start() {
-	go func() {
+    if fs.CheckFn==nil {
+        fs.CheckFn = checkFile
+    }
+    
+    if fs.WalkFn==nil {
+        fs.WalkFn = FSWalkFn
+    }
+    
+    go func() {
 		for {
 			select {
 			case m := <-fs.chanCommand:
 				fs.processCommand(m)
 				if m.GetString("command") == "stop" {
+                    for fs.Status!=WalkerIdle{
+                         time.Sleep(1*time.Millisecond)       
+                    }
 					return
 				}
 
-			case <-time.After(fs.RefreshDuration):
-				r := fs.CheckFn(nil)
-				if r.Status != toolkit.Status_OK {
-					fs.log.Error("Check Fail: " + r.Message)
-				}
-				fs.chanCommand <- toolkit.M{}.Set("command", "walk").Set("data", r.Data)
-
 			default:
+				// do nothing
+			}
+		}
+	}()
+    
+	go func() {
+		for {
+			select {
+			case <-time.After(fs.RefreshDuration):
+				//--- check should only run when status is idle
+                if fs.Status==WalkerIdle{
+                    r := fs.CheckFn(fs, nil)
+                    if r.Status != toolkit.Status_OK {
+                        fs.log.Error("Check Fail: " + r.Message)
+                    }
+                    fs.chanCommand <- toolkit.M{}.Set("command", "walk").Set("data", r.Data)
+                }
+
+			//default:
 				// do nothing
 			}
 		}
@@ -102,12 +149,20 @@ func (fs *FSWalker) processCommand(m toolkit.M) {
 	}
 
 	if cmd == "walk" {
+        //-- protect
+        if fs.Status==WalkerRunning{
+            return
+        }
+        
+        //toolkit.Println("Walker Run")
+        fs.Status = WalkerRunning
 		if fs.WalkFn != nil {
-			r := fs.WalkFn(m)
+			r := fs.WalkFn(fs, m)
 			if r.Status != toolkit.Status_OK {
 				fs.log.Error("Walking Fail: " + r.Message)
 			}
 		}
+        fs.Status = WalkerIdle
 	}
 }
 
