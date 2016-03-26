@@ -66,7 +66,7 @@ func TestWalk(t *testing.T) {
 
 type Scada struct {
     orm.ModelBase `bson:"-" json:"-"`
-    ID string `bson:"_id json:"_id"`
+    ID string `bson:"_id"`
 	Timestamp                                                         time.Time
 	Turbine                                                           string
 	Speed, Direction, Nacel, Temp, FailureTime, ConnectTime, FullTime float32
