@@ -35,7 +35,11 @@ func FSCopy(source, dst string, ismove bool) error {
 	}
 
 	if ismove {
-		os.Remove(source)
+		fsource.Close()
+		e = os.Remove(source)
+		if e != nil {
+			return toolkit.Errorf("FSCopy: Fail to remove source %s", e.Error())
+		}
 	}
 	return nil
 }
